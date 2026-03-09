@@ -44,11 +44,13 @@ sudo ./pcapml capture -o dataset.pcapng
 sudo ./pcapml capture -o dataset.pcapng --allow firefox,chrome
 sudo ./pcapml capture -o dataset.pcapng --deny sshd,snapd
 sudo ./pcapml capture -o dataset.pcapng --include-dns
+sudo ./pcapml capture -o dataset.pcapng --no-resolve
 ```
 
-DNS traffic (port 53) is filtered out by default because DNS queries are sent
-by the system resolver, not the application that triggered the lookup. Use
-`--include-dns` to capture it.
+By default, DNS responses and TLS ClientHello SNI are parsed to resolve
+destination IPs to domain names (e.g. `dst=youtube.com`). DNS packets are
+consumed for resolution but not written to the output file unless
+`--include-dns` is set.
 
 **Flags:**
 
@@ -59,13 +61,14 @@ by the system resolver, not the application that triggered the lookup. Use
 | `--deny` | | Comma-separated deny list of process names |
 | `--snap-len` | `1500` | Max bytes to capture per packet |
 | `--cgroup` | `/sys/fs/cgroup` | Cgroup v2 path to attach to |
-| `--include-dns` | `false` | Include DNS (port 53) traffic |
+| `--include-dns` | `false` | Include DNS (port 53) traffic in output |
+| `--no-resolve` | `false` | Disable DNS/SNI domain resolution in labels |
 
 **Requirements:** Linux 5.8+ with BTF, cgroup v2, root or CAP_BPF +
 CAP_NET_ADMIN + CAP_PERFMON.
 
 **Output format:** pcapng with `LINKTYPE_RAW` (101). Each packet has a comment
-option in the format `sample_id,process_name,direction=egress|ingress`.
+option in the format `sample_id,process_name,d=e|i[,dst=domain]`.
 
 ### label — apply labels to a pcap file
 
@@ -132,6 +135,17 @@ Removes all pcapml labels from a pcapng file and converts to plain pcap.
 ./pcapml strip -i labeled.pcapng -o plain.pcap
 ```
 
+### compare — evaluate labeling accuracy
+
+Compares a ground-truth labeled pcapng (e.g. from eBPF capture) against a
+post-hoc labeled pcapng (e.g. from the `label` subcommand). Prints per-label
+precision, recall, and a confusion matrix.
+
+```bash
+./pcapml compare -truth ground_truth.pcapng -test relabeled.pcapng
+./pcapml compare -truth ground_truth.pcapng -test relabeled.pcapng -csv confusion.csv
+```
+
 ## Typical workflows
 
 ### Live capture (ground truth from eBPF)
@@ -178,9 +192,9 @@ pcapng format. The comment string is comma-separated:
 sample_id,label[,key=value...]
 ```
 
-For live capture: `sample_id,process_name,direction=egress`
+For live capture: `42,chrome,d=e,dst=youtube.com`
 
-For offline labeling: `sample_id,label`
+For offline labeling: `42,web-server`
 
 This format is readable by Wireshark, tcpdump, and any pcapng-aware tool.
 
@@ -196,8 +210,9 @@ The `capture` subcommand uses eBPF to correlate packets with processes:
    5-tuple in the flow map, filter DNS by default, and push matched packets
    to a ring buffer.
 
-3. **Userspace** reads the ring buffer, assigns sample IDs per process name,
-   and writes pcapng with labels.
+3. **Userspace** reads the ring buffer, assigns sample IDs per flow (normalized
+   5-tuple), resolves destination domains via DNS/SNI, and writes pcapng with
+   labels.
 
 ## Current limitations
 
