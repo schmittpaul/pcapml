@@ -1,0 +1,162 @@
+package pcapng
+
+import (
+	"io"
+	"os"
+	"testing"
+)
+
+func TestWriterRoundTrip(t *testing.T) {
+	f, err := os.CreateTemp("", "pcapml-test-*.pcapng")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	// Write
+	w, err := NewWriter(name, LinkTypeEthernet, 65535)
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+
+	packets := []struct {
+		ts      uint64
+		data    []byte
+		origLen uint32
+		comment string
+	}{
+		{1000000, []byte{0xDE, 0xAD, 0xBE, 0xEF}, 4, "0,test-label"},
+		{2000000, []byte{0x01, 0x02, 0x03}, 3, "0,test-label"},
+		{3000000, []byte{0xCA, 0xFE, 0xBA, 0xBE, 0x00}, 5, "1,other-label"},
+	}
+
+	for _, p := range packets {
+		if err := w.WritePacket(p.ts, p.data, p.origLen, p.comment); err != nil {
+			t.Fatalf("write packet: %v", err)
+		}
+	}
+	w.Close()
+
+	// Read back
+	r, err := NewReader(name)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	defer r.Close()
+
+	var epbCount int
+	var linkType uint16
+
+	for {
+		b, err := r.ReadBlock()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read block: %v", err)
+		}
+
+		switch b.Type {
+		case InterfaceDescType:
+			linkType = b.LinkType
+		case EnhancedPacketType:
+			if epbCount >= len(packets) {
+				t.Fatal("more EPBs than expected")
+			}
+			expected := packets[epbCount]
+
+			if b.Comment != expected.comment {
+				t.Errorf("packet %d: comment = %q, want %q", epbCount, b.Comment, expected.comment)
+			}
+			if b.Timestamp() != expected.ts {
+				t.Errorf("packet %d: ts = %d, want %d", epbCount, b.Timestamp(), expected.ts)
+			}
+			if int(b.CapLen) != len(expected.data) {
+				t.Errorf("packet %d: cap_len = %d, want %d", epbCount, b.CapLen, len(expected.data))
+			}
+			if b.OrigLen != expected.origLen {
+				t.Errorf("packet %d: orig_len = %d, want %d", epbCount, b.OrigLen, expected.origLen)
+			}
+			for i := range expected.data {
+				if i < len(b.PacketData) && b.PacketData[i] != expected.data[i] {
+					t.Errorf("packet %d: byte %d = %x, want %x", epbCount, i, b.PacketData[i], expected.data[i])
+				}
+			}
+
+			epbCount++
+		}
+	}
+
+	if linkType != LinkTypeEthernet {
+		t.Errorf("link type = %d, want %d", linkType, LinkTypeEthernet)
+	}
+	if epbCount != len(packets) {
+		t.Errorf("EPB count = %d, want %d", epbCount, len(packets))
+	}
+}
+
+func TestWriterSampleIDAndLabel(t *testing.T) {
+	f, err := os.CreateTemp("", "pcapml-test-*.pcapng")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	w, err := NewWriter(name, LinkTypeRawIPv4, 1500)
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+	w.WritePacket(100, []byte{0x45, 0x00}, 2, "42,firefox,direction=egress")
+	w.Close()
+
+	r, err := NewReader(name)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	defer r.Close()
+
+	for {
+		b, err := r.ReadBlock()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if b.Type == EnhancedPacketType {
+			if b.SampleID() != "42" {
+				t.Errorf("sample ID = %q, want %q", b.SampleID(), "42")
+			}
+			if b.Label() != "firefox" {
+				t.Errorf("label = %q, want %q", b.Label(), "firefox")
+			}
+			return
+		}
+	}
+	t.Error("no EPB found")
+}
+
+func TestWriterDoubleClose(t *testing.T) {
+	f, err := os.CreateTemp("", "pcapml-test-*.pcapng")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	w, err := NewWriter(name, LinkTypeEthernet, 65535)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("first close: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("second close: %v", err)
+	}
+}
