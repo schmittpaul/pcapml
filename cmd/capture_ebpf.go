@@ -257,41 +257,9 @@ func runCapture(args []string) {
 	defer writer.Close()
 
 	// Sample ID tracking (per-flow grouping by normalized 5-tuple)
-	type flowKey struct {
-		ipA, ipB     [4]byte
-		portA, portB uint16
-		proto        uint8
-	}
 	sampleIDs := make(map[flowKey]uint64)
 	flowComm := make(map[flowKey]string)
 	nextSampleID := uint64(0)
-
-	parseFlowKey := func(pkt []byte) (flowKey, bool) {
-		var fk flowKey
-		if len(pkt) < 20 {
-			return fk, false
-		}
-		ihl := int(pkt[0]&0x0F) * 4
-		if ihl < 20 || len(pkt) < ihl+4 {
-			return fk, false
-		}
-		fk.proto = pkt[9]
-		var srcIP, dstIP [4]byte
-		copy(srcIP[:], pkt[12:16])
-		copy(dstIP[:], pkt[16:20])
-		srcPort := uint16(pkt[ihl])<<8 | uint16(pkt[ihl+1])
-		dstPort := uint16(pkt[ihl+2])<<8 | uint16(pkt[ihl+3])
-		// Normalize: smaller IP:port pair first so both directions match
-		if bytes.Compare(srcIP[:], dstIP[:]) > 0 ||
-			(bytes.Equal(srcIP[:], dstIP[:]) && srcPort > dstPort) {
-			fk.ipA, fk.ipB = dstIP, srcIP
-			fk.portA, fk.portB = dstPort, srcPort
-		} else {
-			fk.ipA, fk.ipB = srcIP, dstIP
-			fk.portA, fk.portB = srcPort, dstPort
-		}
-		return fk, true
-	}
 
 	getSampleID := func(fk flowKey, comm string) uint64 {
 		if id, ok := sampleIDs[fk]; ok {
