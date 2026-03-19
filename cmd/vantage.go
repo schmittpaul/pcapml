@@ -419,7 +419,6 @@ func vantageAbsDiff(a, b uint64) uint64 {
 	return b - a
 }
 
-
 func vantagePercentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {
 		return 0

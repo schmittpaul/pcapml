@@ -192,7 +192,6 @@ func pct(num, denom int) float64 {
 	return float64(num) / float64(denom) * 100
 }
 
-
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
