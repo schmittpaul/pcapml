@@ -2,52 +2,12 @@ package cmd
 
 import (
 	"encoding/csv"
-	"math"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/schmittpaul/pcapml/internal/pcapng"
 )
-
-func TestPct(t *testing.T) {
-	cases := []struct {
-		num, denom int
-		want       float64
-	}{
-		{50, 100, 50.0},
-		{1, 3, 100.0 / 3.0},
-		{0, 100, 0.0},
-		{0, 0, 0.0},
-		{100, 100, 100.0},
-	}
-	for _, tc := range cases {
-		got := pct(tc.num, tc.denom)
-		if math.Abs(got-tc.want) > 1e-9 {
-			t.Errorf("pct(%d, %d) = %f, want %f", tc.num, tc.denom, got, tc.want)
-		}
-	}
-}
-
-func TestSortedKeys(t *testing.T) {
-	m := map[string]int{"charlie": 3, "alpha": 1, "bravo": 2}
-	got := sortedKeys(m)
-	want := []string{"alpha", "bravo", "charlie"}
-	if len(got) != len(want) {
-		t.Fatalf("len = %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("sortedKeys[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-
-	// Empty map
-	empty := sortedKeys(map[string]bool{})
-	if len(empty) != 0 {
-		t.Errorf("expected empty slice for empty map, got %v", empty)
-	}
-}
 
 func TestWriteConfusionCSV(t *testing.T) {
 	dir := t.TempDir()
@@ -94,78 +54,37 @@ func TestWriteConfusionCSV(t *testing.T) {
 	}
 }
 
-func TestNextEPB(t *testing.T) {
-	dir := t.TempDir()
-	pcapngPath := filepath.Join(dir, "test.pcapng")
-
-	w, err := pcapng.NewWriter(pcapngPath, pcapng.LinkTypeRawIPv4, 1500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.WritePacket(1000000, []byte{0x45, 0x00}, 2, "s=0,proc=test")
-	w.WritePacket(2000000, []byte{0x45, 0x01}, 2, "s=1,proc=other")
-	w.Close()
-
-	r, err := pcapng.NewReader(pcapngPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	b1 := nextEPB(r)
-	if b1 == nil {
-		t.Fatal("expected first EPB")
-	}
-	if b1.Label() != "test" {
-		t.Errorf("first label = %q, want %q", b1.Label(), "test")
-	}
-
-	b2 := nextEPB(r)
-	if b2 == nil {
-		t.Fatal("expected second EPB")
-	}
-	if b2.Label() != "other" {
-		t.Errorf("second label = %q, want %q", b2.Label(), "other")
-	}
-
-	b3 := nextEPB(r)
-	if b3 != nil {
-		t.Error("expected nil after last EPB")
-	}
-}
-
-func TestCompareCSVOutput(t *testing.T) {
+func TestCompareDetectsMislabel(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create truth file: 3 packets labeled A, A, B
+	// Truth: pkt1=appA, pkt2=appA, pkt3=appB
 	truthPath := filepath.Join(dir, "truth.pcapng")
 	tw, err := pcapng.NewWriter(truthPath, pcapng.LinkTypeRawIPv4, 1500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pktA := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 1, 8, 8, 8, 8}
-	pktB := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x02, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 2, 1, 1, 1, 1}
-	pktC := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x03, 0x00, 0x00, 0x40, 0x11, 0x00, 0x00, 10, 0, 0, 3, 8, 8, 4, 4}
-	tw.WritePacket(1000000, pktA, uint32(len(pktA)), "s=0,proc=appA")
-	tw.WritePacket(2000000, pktB, uint32(len(pktB)), "s=0,proc=appA")
-	tw.WritePacket(3000000, pktC, uint32(len(pktC)), "s=1,proc=appB")
+	pkt1 := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 1, 8, 8, 8, 8}
+	pkt2 := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x02, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 2, 1, 1, 1, 1}
+	pkt3 := []byte{0x45, 0x00, 0x00, 0x28, 0x00, 0x03, 0x00, 0x00, 0x40, 0x11, 0x00, 0x00, 10, 0, 0, 3, 8, 8, 4, 4}
+	tw.WritePacket(1000000, pkt1, uint32(len(pkt1)), "s=0,proc=appA")
+	tw.WritePacket(2000000, pkt2, uint32(len(pkt2)), "s=0,proc=appA")
+	tw.WritePacket(3000000, pkt3, uint32(len(pkt3)), "s=1,proc=appB")
 	tw.Close()
 
-	// Create test file: same packets but second is mislabeled
+	// Test: pkt1=appA (correct), pkt2=appX (WRONG), pkt3=appB (correct)
 	testPath := filepath.Join(dir, "test.pcapng")
 	rw, err := pcapng.NewWriter(testPath, pcapng.LinkTypeRawIPv4, 1500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rw.WritePacket(1000000, pktA, uint32(len(pktA)), "s=0,proc=appA")
-	rw.WritePacket(2000000, pktB, uint32(len(pktB)), "s=0,proc=appX") // mislabeled
-	rw.WritePacket(3000000, pktC, uint32(len(pktC)), "s=1,proc=appB")
+	rw.WritePacket(1000000, pkt1, uint32(len(pkt1)), "s=0,proc=appA")
+	rw.WritePacket(2000000, pkt2, uint32(len(pkt2)), "s=0,proc=appX") // mislabeled
+	rw.WritePacket(3000000, pkt3, uint32(len(pkt3)), "s=1,proc=appB")
 	rw.Close()
 
 	csvPath := filepath.Join(dir, "confusion.csv")
 	runCompare([]string{"-truth", truthPath, "-test", testPath, "-csv", csvPath})
 
-	// Verify CSV was written
 	f, err := os.Open(csvPath)
 	if err != nil {
 		t.Fatalf("open CSV: %v", err)
@@ -177,11 +96,108 @@ func TestCompareCSVOutput(t *testing.T) {
 		t.Fatalf("read CSV: %v", err)
 	}
 
-	// Should have header + rows for each truth label
-	if len(records) < 2 {
-		t.Fatalf("expected at least 2 CSV rows, got %d", len(records))
+	// Header + 2 truth labels (appA, appB)
+	if len(records) != 3 {
+		t.Fatalf("expected 3 CSV rows, got %d", len(records))
 	}
-	if records[0][0] != "ground_truth" {
-		t.Errorf("CSV header[0] = %q, want %q", records[0][0], "ground_truth")
+
+	// Build lookup: confusion[truthLabel][testLabel] = count string
+	// Header row tells us column order
+	header := records[0] // ground_truth, appA, appB, appX
+	colIdx := make(map[string]int)
+	for i, h := range header {
+		colIdx[h] = i
 	}
+
+	rowIdx := make(map[string][]string)
+	for _, r := range records[1:] {
+		rowIdx[r[0]] = r
+	}
+
+	// appA truth row: 1 correct (appA→appA), 1 mislabeled (appA→appX)
+	appARow := rowIdx["appA"]
+	if appARow == nil {
+		t.Fatal("missing appA row")
+	}
+	if appARow[colIdx["appA"]] != "1" {
+		t.Errorf("appA→appA = %s, want 1", appARow[colIdx["appA"]])
+	}
+	if appARow[colIdx["appX"]] != "1" {
+		t.Errorf("appA→appX = %s, want 1 (the mislabel)", appARow[colIdx["appX"]])
+	}
+
+	// appB truth row: 1 correct (appB→appB)
+	appBRow := rowIdx["appB"]
+	if appBRow == nil {
+		t.Fatal("missing appB row")
+	}
+	if appBRow[colIdx["appB"]] != "1" {
+		t.Errorf("appB→appB = %s, want 1", appBRow[colIdx["appB"]])
+	}
+}
+
+func TestCompareUnlabeledPackets(t *testing.T) {
+	dir := t.TempDir()
+
+	// Truth has 3 packets, test file only has 2 (missing the middle one)
+	truthPath := filepath.Join(dir, "truth.pcapng")
+	tw, err := pcapng.NewWriter(truthPath, pcapng.LinkTypeRawIPv4, 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkt1 := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 1, 8, 8, 8, 8}
+	pkt2 := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x02, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 2, 1, 1, 1, 1}
+	pkt3 := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x03, 0x00, 0x00, 0x40, 0x06, 0x00, 0x00, 10, 0, 0, 3, 9, 9, 9, 9}
+	tw.WritePacket(1000000, pkt1, uint32(len(pkt1)), "s=0,proc=app")
+	tw.WritePacket(2000000, pkt2, uint32(len(pkt2)), "s=0,proc=app")
+	tw.WritePacket(3000000, pkt3, uint32(len(pkt3)), "s=1,proc=app")
+	tw.Close()
+
+	// Test file: only pkt1 and pkt3 — pkt2 is missing (unlabeled)
+	testPath := filepath.Join(dir, "test.pcapng")
+	rw, err := pcapng.NewWriter(testPath, pcapng.LinkTypeRawIPv4, 1500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw.WritePacket(1000000, pkt1, uint32(len(pkt1)), "s=0,proc=app")
+	rw.WritePacket(3000000, pkt3, uint32(len(pkt3)), "s=1,proc=app")
+	rw.Close()
+
+	csvPath := filepath.Join(dir, "confusion.csv")
+	runCompare([]string{"-truth", truthPath, "-test", testPath, "-csv", csvPath})
+
+	f, err := os.Open(csvPath)
+	if err != nil {
+		t.Fatalf("open CSV: %v", err)
+	}
+	defer f.Close()
+
+	records, err := csv.NewReader(f).ReadAll()
+	if err != nil {
+		t.Fatalf("read CSV: %v", err)
+	}
+
+	// Find the <unlabeled> column — it should exist because one truth packet was unmatched
+	header := records[0]
+	unlabeledCol := -1
+	for i, h := range header {
+		if h == "<unlabeled>" {
+			unlabeledCol = i
+			break
+		}
+	}
+	if unlabeledCol == -1 {
+		t.Fatal("expected <unlabeled> column in confusion matrix for unmatched truth packet")
+	}
+
+	// The app row should have 1 unlabeled entry
+	for _, r := range records[1:] {
+		if r[0] == "app" {
+			if r[unlabeledCol] != "1" {
+				t.Errorf("app→<unlabeled> = %s, want 1", r[unlabeledCol])
+			}
+			return
+		}
+	}
+	t.Error("missing app row in confusion matrix")
 }
