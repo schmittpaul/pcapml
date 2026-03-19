@@ -191,12 +191,13 @@ func (w *Writer) writeU16(v uint16) error {
 	return binary.Write(w.f, w.le, v)
 }
 
+var zeros [3]byte
+
 func (w *Writer) writePad(n uint32) error {
 	if n == 0 {
 		return nil
 	}
-	zeros := make([]byte, n)
-	_, err := w.f.Write(zeros)
+	_, err := w.f.Write(zeros[:n])
 	return err
 }
 
