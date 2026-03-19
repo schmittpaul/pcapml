@@ -336,18 +336,7 @@ func runCapture(args []string) {
 		// Resolution: process DNS responses and extract SNI
 		isDNS := false
 		if res != nil {
-			isDNS = res.processDNS(pktData)
-
-			// Extract SNI from TLS ClientHello or QUIC Initial
-			sni := extractSNI(pktData)
-			if sni == "" {
-				sni = extractQUICSNI(pktData)
-			}
-			if sni != "" && len(pktData) >= 20 {
-				var dstIP [4]byte
-				copy(dstIP[:], pktData[16:20])
-				res.addMapping(dstIP, sni, 3600) // 1hr TTL for SNI
-			}
+			isDNS = res.processPacket(pktData)
 		}
 
 		// Skip writing DNS packets unless user explicitly wants them

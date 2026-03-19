@@ -157,16 +157,7 @@ func runCaptureGateway(outFile string, snapLen uint, wanIface string, includeDNS
 		// DNS/SNI resolution
 		isDNS := false
 		if res != nil {
-			isDNS = res.processDNS(pktData)
-			sni := extractSNI(pktData)
-			if sni == "" {
-				sni = extractQUICSNI(pktData)
-			}
-			if sni != "" && len(pktData) >= 20 {
-				var dstIP [4]byte
-				copy(dstIP[:], pktData[16:20])
-				res.addMapping(dstIP, sni, 3600)
-			}
+			isDNS = res.processPacket(pktData)
 		}
 
 		if isDNS && !includeDNS {

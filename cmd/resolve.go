@@ -53,6 +53,22 @@ func (e *resolver) addMapping(ip [4]byte, domain string, ttl uint32) {
 	}
 }
 
+// processPacket handles DNS response parsing and SNI extraction for a packet.
+// Returns true if the packet is DNS traffic.
+func (e *resolver) processPacket(pktData []byte) bool {
+	isDNS := e.processDNS(pktData)
+	sni := extractSNI(pktData)
+	if sni == "" {
+		sni = extractQUICSNI(pktData)
+	}
+	if sni != "" && len(pktData) >= 20 {
+		var dstIP [4]byte
+		copy(dstIP[:], pktData[16:20])
+		e.addMapping(dstIP, sni, 3600) // 1hr TTL for SNI
+	}
+	return isDNS
+}
+
 // resolveLabel returns the destination domain for a packet, if known.
 // pkt is raw IPv4 (no link-layer header).
 func (e *resolver) resolveLabel(pkt []byte) string {
