@@ -93,7 +93,9 @@ func runSplit(args []string) {
 			ts := block.Timestamp()
 			tsSec := uint32(ts / 1_000_000)
 			tsUsec := uint32(ts % 1_000_000)
-			curWriter.WritePacket(tsSec, tsUsec, block.CapLen, block.OrigLen, block.PacketData)
+			if err := curWriter.WritePacket(tsSec, tsUsec, block.CapLen, block.OrigLen, block.PacketData); err != nil {
+				log.Fatalf("write error: %v", err)
+			}
 		}
 	}
 
