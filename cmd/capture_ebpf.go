@@ -344,14 +344,15 @@ func runCapture(args []string) {
 		if res != nil {
 			isDNS = res.processDNS(pktData)
 
-			// Extract SNI from TLS ClientHello
-			if sni := extractSNI(pktData); sni != "" {
-				// Map the destination IP to this SNI domain
-				if len(pktData) >= 20 {
-					var dstIP [4]byte
-					copy(dstIP[:], pktData[16:20])
-					res.addMapping(dstIP, sni, 3600) // 1hr TTL for SNI
-				}
+			// Extract SNI from TLS ClientHello or QUIC Initial
+			sni := extractSNI(pktData)
+			if sni == "" {
+				sni = extractQUICSNI(pktData)
+			}
+			if sni != "" && len(pktData) >= 20 {
+				var dstIP [4]byte
+				copy(dstIP[:], pktData[16:20])
+				res.addMapping(dstIP, sni, 3600) // 1hr TTL for SNI
 			}
 		}
 
