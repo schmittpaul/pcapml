@@ -158,22 +158,47 @@ func (b *Block) Timestamp() uint64 {
 	return uint64(b.TsHigh)<<32 | uint64(b.TsLow)
 }
 
-// SampleID extracts the sample ID from the comment (first comma-separated field).
+// CommentVal extracts the value for a given key from a comma-separated
+// key=value comment string. Returns "" if the key is not found.
+func CommentVal(comment, key string) string {
+	prefix := key + "="
+	for _, field := range strings.Split(comment, ",") {
+		if strings.HasPrefix(field, prefix) {
+			return field[len(prefix):]
+		}
+	}
+	return ""
+}
+
+// SampleID extracts the sample ID from the comment.
+// Supports keyed format (s=<id>,...) and legacy positional format (<id>,...).
 func (b *Block) SampleID() string {
 	if b.Comment == "" {
 		return ""
 	}
+	if v := CommentVal(b.Comment, "s"); v != "" {
+		return v
+	}
+	// Legacy positional fallback: first comma-separated field
 	if idx := strings.IndexByte(b.Comment, ','); idx >= 0 {
 		return b.Comment[:idx]
 	}
 	return b.Comment
 }
 
-// Label extracts the label from the comment (second comma-separated field).
+// Label extracts the label from the comment.
+// Supports keyed format (proc=<label>,...) and legacy positional format (<id>,<label>,...).
 func (b *Block) Label() string {
 	if b.Comment == "" {
 		return ""
 	}
+	if v := CommentVal(b.Comment, "proc"); v != "" {
+		return v
+	}
+	if v := CommentVal(b.Comment, "dst"); v != "" {
+		return v
+	}
+	// Legacy positional fallback: second comma-separated field
 	if idx := strings.IndexByte(b.Comment, ','); idx >= 0 {
 		rest := b.Comment[idx+1:]
 		if idx2 := strings.IndexByte(rest, ','); idx2 >= 0 {

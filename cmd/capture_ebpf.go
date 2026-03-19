@@ -1,4 +1,4 @@
-//go:build ebpf
+//go:build ebpf && (386 || amd64)
 
 package cmd
 
@@ -9,16 +9,15 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
-	"golang.org/x/sys/unix"
 
 	"github.com/schmittpaul/pcapml/internal/pcapng"
 )
@@ -26,57 +25,78 @@ import (
 const captureDescription = "Live capture with eBPF (exact process attribution, Linux only)"
 
 const (
-	maxCommLen = 16
-	maxPktLen  = 1500
-	hdrSize    = 8 + 4 + 4 + 4 + 4 + 1 + 3 + 16 // 44 bytes
-
 	cfgSnapLen    = 0
 	cfgUseAllow   = 1
 	cfgUseDeny    = 2
 	cfgIncludeDNS = 3
+	cfgCgroupInfo = 4
 )
-
-type pktEventHdr struct {
-	TimestampNs uint64
-	Pid         uint32
-	Uid         uint32
-	PktLen      uint32
-	CapLen      uint32
-	Direction   uint8
-	Pad         [3]uint8
-	Comm        [maxCommLen]byte
-}
-
-type captureStats struct {
-	packetsCapt    uint64
-	packetsDropped uint64
-	packetsUnknown uint64
-}
 
 func runCapture(args []string) {
 	fs := flag.NewFlagSet("capture", flag.ExitOnError)
 	var (
 		outFile    string
+		mode       string
+		wanIface   string
 		allow      string
 		deny       string
+		lanNets    string
 		snapLen    uint
 		cgroupP    string
 		includeDNS bool
 		noResolve  bool
+		cgroupInfo bool
 	)
 
 	fs.StringVar(&outFile, "o", "capture.pcapng", "output pcapng file")
-	fs.StringVar(&allow, "allow", "", "comma-separated allow list of process names")
-	fs.StringVar(&deny, "deny", "", "comma-separated deny list of process names")
+	fs.StringVar(&mode, "mode", "host", "capture mode: host (process attribution) or gateway (network path)")
+	fs.StringVar(&wanIface, "wan", "", "WAN interface for gateway mode (direction is inferred from this interface)")
+	fs.StringVar(&allow, "allow", "", "comma-separated allow list of process names (host mode only)")
+	fs.StringVar(&deny, "deny", "", "comma-separated deny list of process names (host mode only)")
+	fs.StringVar(&lanNets, "lan", "", "comma-separated LAN CIDRs for direction classification (e.g., 192.168.1.0/24); auto-detected from interfaces if omitted")
 	fs.UintVar(&snapLen, "snap-len", maxPktLen, "max bytes to capture per packet")
-	fs.StringVar(&cgroupP, "cgroup", "/sys/fs/cgroup", "cgroup v2 path to attach to")
+	fs.StringVar(&cgroupP, "cgroup", "/sys/fs/cgroup", "cgroup v2 path to attach to (host mode only)")
 	fs.BoolVar(&includeDNS, "include-dns", false, "include DNS (port 53) traffic in capture")
 	fs.BoolVar(&noResolve, "no-resolve", false, "disable DNS/SNI domain resolution in labels")
+	fs.BoolVar(&cgroupInfo, "cgroup-info", false, "include cgroup path in packet labels (host mode only)")
 
 	fs.Parse(args)
 
+	if mode == "gateway" {
+		runCaptureGateway(args, outFile, snapLen, wanIface, includeDNS, noResolve)
+		return
+	}
+
+	if mode != "host" {
+		log.Fatalf("unknown capture mode %q (use 'host' or 'gateway')", mode)
+	}
+
 	if allow != "" && deny != "" {
 		log.Fatal("cannot use both --allow and --deny")
+	}
+
+	// Parse or auto-detect LAN CIDRs for direction classification
+	var lanCIDRs []*net.IPNet
+	if lanNets != "" {
+		for _, cidr := range strings.Split(lanNets, ",") {
+			cidr = strings.TrimSpace(cidr)
+			if cidr == "" {
+				continue
+			}
+			_, network, err := net.ParseCIDR(cidr)
+			if err != nil {
+				log.Fatalf("invalid LAN CIDR %q: %v", cidr, err)
+			}
+			lanCIDRs = append(lanCIDRs, network)
+		}
+		log.Printf("LAN networks (from -lan flag): %v", lanCIDRs)
+	} else {
+		lanCIDRs = detectLANCIDRs()
+		if len(lanCIDRs) > 0 {
+			log.Printf("LAN networks (auto-detected from interfaces): %v", lanCIDRs)
+		} else {
+			log.Println("no LAN networks detected; direction labels will use lan2wan/wan2lan (from BPF egress/ingress)")
+		}
 	}
 
 	// Compute boot time offset for wall-clock timestamps
@@ -111,6 +131,14 @@ func runCapture(args []string) {
 		if includeDNS {
 			log.Println("DNS traffic (port 53) will be included in capture")
 		}
+	}
+
+	// Enable cgroup info collection in eBPF
+	if cgroupInfo {
+		if err := objs.PcapmlConfig.Update(uint32(cfgCgroupInfo), uint32(1), ebpf.UpdateAny); err != nil {
+			log.Fatalf("failed to set cgroup_info config: %v", err)
+		}
+		log.Println("cgroup info recording enabled")
 	}
 
 	// Initialize resolver for DNS/SNI domain resolution
@@ -276,6 +304,12 @@ func runCapture(args []string) {
 		return id
 	}
 
+	// Cgroup resolver
+	var cgRes *cgroupResolver
+	if cgroupInfo {
+		cgRes = newCgroupResolver()
+	}
+
 	// Signal handling
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -314,22 +348,22 @@ func runCapture(args []string) {
 		}
 
 		raw := record.RawSample
-		if len(raw) < hdrSize {
+		if len(raw) < hostHdrSize {
 			st.packetsDropped++
 			continue
 		}
 
 		var hdr pktEventHdr
-		if err := binary.Read(bytes.NewReader(raw[:hdrSize]), binary.LittleEndian, &hdr); err != nil {
+		if err := binary.Read(bytes.NewReader(raw[:hostHdrSize]), binary.LittleEndian, &hdr); err != nil {
 			st.packetsDropped++
 			continue
 		}
 
-		dataEnd := hdrSize + int(hdr.CapLen)
+		dataEnd := hostHdrSize + int(hdr.CapLen)
 		if dataEnd > len(raw) {
 			dataEnd = len(raw)
 		}
-		pktData := raw[hdrSize:dataEnd]
+		pktData := raw[hostHdrSize:dataEnd]
 
 		comm := strings.TrimRight(string(hdr.Comm[:]), "\x00")
 		if comm == "" {
@@ -365,16 +399,27 @@ func runCapture(args []string) {
 		}
 		sid := getSampleID(fk, comm)
 
-		// Label format: sample_id,process,d=e|i[,dst=domain]
-		dir := "e"
-		if hdr.Direction == 0 {
-			dir = "i"
+		// Label format: s=<id>,proc=<name>,dir=<direction>[,dst=<domain>]
+		// If LAN CIDRs are configured, classify as lan2wan/wan2lan/lan2lan/wan2wan.
+		// Otherwise fall back to e(gress)/i(ngress) relative to the process.
+		var dir string
+		if len(lanCIDRs) > 0 && len(pktData) >= 20 {
+			dir = classifyDirection(pktData, lanCIDRs)
+		} else {
+			dir = "lan2wan"
+			if hdr.Direction == 0 {
+				dir = "wan2lan"
+			}
 		}
-		comment := fmt.Sprintf("%d,%s,d=%s", sid, comm, dir)
+		comment := fmt.Sprintf("s=%d,proc=%s,dir=%s", sid, comm, dir)
 		if res != nil {
 			if domain := res.resolveLabel(pktData); domain != "" {
 				comment += ",dst=" + domain
 			}
+		}
+		if cgRes != nil && hdr.CgroupId != 0 {
+			cgPath := cgRes.resolve(hdr.CgroupId, hdr.Pid)
+			comment += ",cgroup=" + cgPath
 		}
 
 		wallNs := int64(hdr.TimestampNs) + bootOffset
@@ -406,12 +451,72 @@ func runCapture(args []string) {
 	fmt.Printf("output: %s\n", outFile)
 }
 
-func getBootTimeOffset() (int64, error) {
-	var bootTs unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_BOOTTIME, &bootTs); err != nil {
-		return 0, fmt.Errorf("clock_gettime BOOTTIME: %w", err)
+// classifyDirection determines the network-topology direction of a packet
+// based on whether the source and destination IPs are within the configured
+// LAN CIDRs. pkt must be a raw IPv4 packet (at least 20 bytes).
+func classifyDirection(pkt []byte, lanCIDRs []*net.IPNet) string {
+	srcIP := net.IP(pkt[12:16])
+	dstIP := net.IP(pkt[16:20])
+
+	srcLocal := ipInNets(srcIP, lanCIDRs)
+	dstLocal := ipInNets(dstIP, lanCIDRs)
+
+	switch {
+	case srcLocal && dstLocal:
+		return "lan2lan"
+	case srcLocal && !dstLocal:
+		return "lan2wan"
+	case !srcLocal && dstLocal:
+		return "wan2lan"
+	default:
+		return "wan2wan"
 	}
-	bootNs := bootTs.Sec*1e9 + bootTs.Nsec
-	wallNs := time.Now().UnixNano()
-	return wallNs - bootNs, nil
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// detectLANCIDRs discovers LAN subnets from the host's network interfaces.
+// It returns the subnet CIDR for each non-loopback interface that has an
+// IPv4 address.
+func detectLANCIDRs() []*net.IPNet {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var cidrs []*net.IPNet
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			if ipNet.IP.To4() == nil {
+				continue // skip IPv6
+			}
+			// Mask to get the network address
+			network := &net.IPNet{
+				IP:   ipNet.IP.Mask(ipNet.Mask),
+				Mask: ipNet.Mask,
+			}
+			cidrs = append(cidrs, network)
+		}
+	}
+	return cidrs
 }

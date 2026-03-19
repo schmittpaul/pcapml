@@ -90,7 +90,10 @@ func runSplit(args []string) {
 				}
 			}
 
-			curWriter.WritePacket(block.TsHigh, block.TsLow, block.CapLen, block.OrigLen, block.PacketData)
+			ts64 := uint64(block.TsHigh)<<32 | uint64(block.TsLow)
+			tsSec := uint32(ts64 / 1_000_000)
+			tsUsec := uint32(ts64 % 1_000_000)
+			curWriter.WritePacket(tsSec, tsUsec, block.CapLen, block.OrigLen, block.PacketData)
 		}
 	}
 

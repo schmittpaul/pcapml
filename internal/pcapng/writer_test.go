@@ -27,9 +27,9 @@ func TestWriterRoundTrip(t *testing.T) {
 		origLen uint32
 		comment string
 	}{
-		{1000000, []byte{0xDE, 0xAD, 0xBE, 0xEF}, 4, "0,test-label"},
-		{2000000, []byte{0x01, 0x02, 0x03}, 3, "0,test-label"},
-		{3000000, []byte{0xCA, 0xFE, 0xBA, 0xBE, 0x00}, 5, "1,other-label"},
+		{1000000, []byte{0xDE, 0xAD, 0xBE, 0xEF}, 4, "s=0,proc=test-label"},
+		{2000000, []byte{0x01, 0x02, 0x03}, 3, "s=0,proc=test-label"},
+		{3000000, []byte{0xCA, 0xFE, 0xBA, 0xBE, 0x00}, 5, "s=1,proc=other-label"},
 	}
 
 	for _, p := range packets {
@@ -110,7 +110,7 @@ func TestWriterSampleIDAndLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create writer: %v", err)
 	}
-	w.WritePacket(100, []byte{0x45, 0x00}, 2, "42,firefox,direction=egress")
+	w.WritePacket(100, []byte{0x45, 0x00}, 2, "s=42,proc=firefox,dir=e")
 	w.Close()
 
 	r, err := NewReader(name)
@@ -128,11 +128,55 @@ func TestWriterSampleIDAndLabel(t *testing.T) {
 			t.Fatalf("read: %v", err)
 		}
 		if b.Type == EnhancedPacketType {
-			if b.SampleID() != "42" {
-				t.Errorf("sample ID = %q, want %q", b.SampleID(), "42")
+			if sid := b.SampleID(); sid != "42" {
+				t.Errorf("sample ID = %q, want %q", sid, "42")
 			}
-			if b.Label() != "firefox" {
-				t.Errorf("label = %q, want %q", b.Label(), "firefox")
+			if label := b.Label(); label != "firefox" {
+				t.Errorf("label = %q, want %q", label, "firefox")
+			}
+			return
+		}
+	}
+	t.Error("no EPB found")
+}
+
+func TestWriterGatewayLabel(t *testing.T) {
+	f, err := os.CreateTemp("", "pcapml-test-*.pcapng")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := f.Name()
+	f.Close()
+	defer os.Remove(name)
+
+	w, err := NewWriter(name, LinkTypeRawIPv4, 1500)
+	if err != nil {
+		t.Fatalf("create writer: %v", err)
+	}
+	// Gateway mode label: no proc, dst used as Label() fallback
+	w.WritePacket(100, []byte{0x45, 0x00}, 2, "s=7,dir=wan2lan,dst=youtube.com")
+	w.Close()
+
+	r, err := NewReader(name)
+	if err != nil {
+		t.Fatalf("open reader: %v", err)
+	}
+	defer r.Close()
+
+	for {
+		b, err := r.ReadBlock()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		if b.Type == EnhancedPacketType {
+			if sid := b.SampleID(); sid != "7" {
+				t.Errorf("sample ID = %q, want %q", sid, "7")
+			}
+			if label := b.Label(); label != "youtube.com" {
+				t.Errorf("label = %q, want %q", label, "youtube.com")
 			}
 			return
 		}

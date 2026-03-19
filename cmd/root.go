@@ -26,6 +26,10 @@ func Execute() {
 		runLabel(os.Args[2:])
 	case "compare":
 		runCompare(os.Args[2:])
+	case "vantage":
+		runVantage(os.Args[2:])
+	case "summary":
+		runSummary(os.Args[2:])
 	case "version":
 		fmt.Printf("pcapml %s\n", version)
 	case "help", "-h", "--help":
@@ -44,12 +48,16 @@ Usage:
   pcapml <subcommand> [flags]
 
 Subcommands:
-  capture   %s (includes DNS/SNI domain resolution by default)
+  capture   %s
+              --mode host    (default) process attribution via cgroup eBPF
+              --mode gateway network-path capture via TC eBPF on WAN interface
   label     Apply labels to a pcap file using a label file
   split     Split a labeled pcapng into per-sample pcap files
   sort      Sort a labeled pcapng by sample_id then timestamp
   strip     Remove labels from pcapng, producing a plain pcap
   compare   Compare ground-truth labels against post-hoc labels
+  vantage   Cross-vantage flow join: compare host vs gateway captures
+  summary   Per-label packet count summary for a pcapng file
   version   Print version
 
 Run 'pcapml <subcommand> -h' for subcommand help.

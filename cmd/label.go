@@ -1,3 +1,5 @@
+//go:build pcap
+
 package cmd
 
 import (
@@ -176,7 +178,7 @@ func loadLabelFile(path string) ([]labelEntry, error) {
 			sampleID: sid,
 			label:    metadata,
 			tsEnd:    ^uint64(0),
-			comment:  fmt.Sprintf("%d,%s", sid, metadata),
+			comment:  fmt.Sprintf("s=%d,proc=%s", sid, metadata),
 		}
 
 		// Parse traffic filter components

@@ -17,6 +17,7 @@
 #define CFG_USE_ALLOW   1
 #define CFG_USE_DENY    2
 #define CFG_INCLUDE_DNS 3
+#define CFG_CGROUP_INFO 4
 
 #define DNS_PORT 53
 
@@ -34,6 +35,7 @@ struct flow_key {
 struct process_info {
     __u32 pid;
     __u32 uid;
+    __u64 cgroup_id;
     char  comm[MAX_COMM_LEN];
 };
 
@@ -47,6 +49,8 @@ struct pkt_event {
     __u8  direction;
     __u8  pad[3];
     char  comm[MAX_COMM_LEN];
+    __u32 pad2;
+    __u64 cgroup_id;
     __u8  pkt_data[MAX_PKT_LEN];
 };
 
@@ -87,8 +91,17 @@ struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
     __type(value, __u32);
-    __uint(max_entries, 4);
+    __uint(max_entries, 8);
 } pcapml_config SEC(".maps");
+
+// Per-CPU scratch space to launder cap_len through a map read, giving the
+// BPF verifier a fresh scalar it can bound-check without prior history.
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, 1);
+} scratch SEC(".maps");
 
 // --- Helpers ---
 
@@ -108,6 +121,11 @@ static __always_inline void record_flow(struct sock *sk) {
     info.pid = bpf_get_current_pid_tgid() >> 32;
     info.uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
     bpf_get_current_comm(&info.comm, sizeof(info.comm));
+
+    __u32 cg_key = CFG_CGROUP_INFO;
+    __u32 *cg_val = bpf_map_lookup_elem(&pcapml_config, &cg_key);
+    if (cg_val && *cg_val)
+        info.cgroup_id = bpf_get_current_cgroup_id();
 
     bpf_map_update_elem(&flow_map, &key, &info, BPF_ANY);
 }
@@ -238,6 +256,11 @@ static __always_inline int capture_packet(struct __sk_buff *skb,
     if (cap_len == 0)
         return 1;
 
+    // Launder cap_len through a per-CPU map so the verifier gets a fresh
+    // scalar with no prior range history.
+    __u32 scratch_key = 0;
+    bpf_map_update_elem(&scratch, &scratch_key, &cap_len, BPF_ANY);
+
     // Reserve ring buffer space and build event
     struct pkt_event *evt = bpf_ringbuf_reserve(&events,
                                                  sizeof(struct pkt_event), 0);
@@ -248,12 +271,28 @@ static __always_inline int capture_packet(struct __sk_buff *skb,
     evt->pid = info->pid;
     evt->uid = info->uid;
     evt->pkt_len = pkt_len;
-    evt->cap_len = cap_len;
     evt->direction = direction;
     __builtin_memcpy(evt->comm, info->comm, MAX_COMM_LEN);
+    evt->cgroup_id = info->cgroup_id;
 
-    // Copy packet data (cap_len is bounded by MAX_PKT_LEN above)
-    if (bpf_skb_load_bytes(skb, 0, evt->pkt_data, cap_len) < 0) {
+    // Read cap_len back from the map — verifier sees an unbounded scalar.
+    // Read into a local ONCE, then check the local.
+    __u32 *len_ptr = bpf_map_lookup_elem(&scratch, &scratch_key);
+    if (!len_ptr) {
+        bpf_ringbuf_discard(evt, 0);
+        return 1;
+    }
+    __u32 read_len = *len_ptr;
+    __u32 min_len = 1;
+    asm volatile("" : "+r"(min_len));
+    if (read_len < min_len || read_len > MAX_PKT_LEN) {
+        bpf_ringbuf_discard(evt, 0);
+        return 1;
+    }
+    evt->cap_len = read_len;
+
+    // Copy packet data
+    if (bpf_skb_load_bytes(skb, 0, evt->pkt_data, read_len) < 0) {
         bpf_ringbuf_discard(evt, 0);
         return 1;
     }
