@@ -186,8 +186,8 @@ func runVantage(args []string) {
 	fmt.Printf("Gateway flows:   %d\n", len(gwFlows))
 	fmt.Printf("Matched flows:   %d (%.1f%% of host, %.1f%% of gateway)\n",
 		len(matches),
-		vantagePct(len(matches), len(hostFlows)),
-		vantagePct(len(matches), len(gwFlows)))
+		pct(len(matches), len(hostFlows)),
+		pct(len(matches), len(gwFlows)))
 	fmt.Printf("Hidden (host-only, no gateway match): %d\n", hostUnmatched)
 	fmt.Printf("Dark (gateway-only, no host match):   %d\n", gwUnmatched)
 	fmt.Println()
@@ -199,11 +199,11 @@ func runVantage(args []string) {
 		if bothHave > 0 {
 			fmt.Printf("  agree:    %d (%.1f%% of %d with both)\n",
 				agreeCounts[domainAgree],
-				vantagePct(agreeCounts[domainAgree], bothHave),
+				pct(agreeCounts[domainAgree], bothHave),
 				bothHave)
 			fmt.Printf("  disagree: %d (%.1f%% of %d with both)\n",
 				agreeCounts[domainDisagree],
-				vantagePct(agreeCounts[domainDisagree], bothHave),
+				pct(agreeCounts[domainDisagree], bothHave),
 				bothHave)
 		}
 		fmt.Printf("  host_only: %d\n", agreeCounts[domainHostOnly])
@@ -419,12 +419,6 @@ func vantageAbsDiff(a, b uint64) uint64 {
 	return b - a
 }
 
-func vantagePct(num, denom int) float64 {
-	if denom == 0 {
-		return 0
-	}
-	return 100 * float64(num) / float64(denom)
-}
 
 func vantagePercentile(sorted []float64, p float64) float64 {
 	if len(sorted) == 0 {

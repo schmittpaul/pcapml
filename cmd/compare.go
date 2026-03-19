@@ -150,8 +150,8 @@ func runCompare(args []string) {
 				postHocTotal += cnt
 			}
 		}
-		precision := safePct(labelCorrect, postHocTotal)
-		recall := safePct(labelCorrect, total)
+		precision := pct(labelCorrect, postHocTotal)
+		recall := pct(labelCorrect, total)
 
 		fmt.Printf("%-20s %8d %8d %8d %7.1f%% %7.1f%%\n",
 			tl, total, labelMatched, labelCorrect, precision, recall)
@@ -192,12 +192,6 @@ func pct(num, denom int) float64 {
 	return float64(num) / float64(denom) * 100
 }
 
-func safePct(num, denom int) float64 {
-	if denom == 0 {
-		return 0
-	}
-	return float64(num) / float64(denom) * 100
-}
 
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
