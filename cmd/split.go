@@ -80,7 +80,7 @@ func runSplit(args []string) {
 
 				curSID = sid
 				samples++
-				outName := sid + "_" + label + ".pcap"
+				outName := filepath.Base(sid) + "_" + filepath.Base(label) + ".pcap"
 				fmt.Fprintf(metaFile, "%s,%s\n", outName, label)
 
 				outPath := filepath.Join(outDir, outName)
