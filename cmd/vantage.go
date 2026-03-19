@@ -320,7 +320,7 @@ func loadVantageFlows(filename string) ([]indexedFlow, int) {
 		proto := pkt[9]
 		var dstIP [4]byte
 		copy(dstIP[:], pkt[16:20])
-		dstPort := uint16(pkt[ihl])<<8 | uint16(pkt[ihl+1])
+		dstPort := uint16(pkt[ihl+2])<<8 | uint16(pkt[ihl+3])
 
 		fa.dstKeys[dstKey{dstIP: dstIP, dstPort: dstPort, proto: proto}] = true
 
