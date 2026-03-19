@@ -216,12 +216,6 @@ func runCapture(args []string) {
 	defer kpUdpDestroy.Close()
 
 	// Attach cgroup_skb programs
-	cgroupFd, err := os.Open(cgroupP)
-	if err != nil {
-		log.Fatalf("failed to open cgroup %s: %v", cgroupP, err)
-	}
-	defer cgroupFd.Close()
-
 	cgEgress, err := link.AttachCgroup(link.CgroupOptions{
 		Path:    cgroupP,
 		Attach:  ebpf.AttachCGroupInetEgress,
