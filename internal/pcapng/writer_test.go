@@ -184,6 +184,28 @@ func TestWriterGatewayLabel(t *testing.T) {
 	t.Error("no EPB found")
 }
 
+func TestPad4(t *testing.T) {
+	cases := []struct {
+		n    uint32
+		want uint32
+	}{
+		{0, 0},
+		{1, 3},
+		{2, 2},
+		{3, 1},
+		{4, 0},
+		{5, 3},
+		{100, 0},
+		{101, 3},
+	}
+	for _, tc := range cases {
+		got := pad4(tc.n)
+		if got != tc.want {
+			t.Errorf("pad4(%d) = %d, want %d", tc.n, got, tc.want)
+		}
+	}
+}
+
 func TestWriterDoubleClose(t *testing.T) {
 	f, err := os.CreateTemp("", "pcapml-test-*.pcapng")
 	if err != nil {

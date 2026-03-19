@@ -104,6 +104,56 @@ func TestReaderTimestamp(t *testing.T) {
 	t.Error("no EPB blocks found")
 }
 
+func TestCommentVal(t *testing.T) {
+	cases := []struct {
+		comment string
+		key     string
+		want    string
+	}{
+		{"s=42,proc=firefox,dir=lan2wan", "s", "42"},
+		{"s=42,proc=firefox,dir=lan2wan", "proc", "firefox"},
+		{"s=42,proc=firefox,dir=lan2wan", "dir", "lan2wan"},
+		{"s=42,proc=firefox,dir=lan2wan,dst=example.com", "dst", "example.com"},
+		{"s=42,proc=firefox,dir=lan2wan", "dst", ""},
+		{"s=42,proc=firefox,dir=lan2wan", "missing", ""},
+		{"", "s", ""},
+		{"s=0", "s", "0"},
+		{"s=,proc=test", "s", ""},
+	}
+	for _, tc := range cases {
+		got := CommentVal(tc.comment, tc.key)
+		if got != tc.want {
+			t.Errorf("CommentVal(%q, %q) = %q, want %q", tc.comment, tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestSampleIDAndLabel(t *testing.T) {
+	cases := []struct {
+		comment  string
+		wantSID  string
+		wantLabel string
+	}{
+		// Keyed format
+		{"s=42,proc=firefox,dir=lan2wan", "42", "firefox"},
+		{"s=7,dir=wan2lan,dst=youtube.com", "7", "youtube.com"},
+		// Legacy positional format
+		{"123,myapp,extra", "123", "myapp"},
+		{"456,single", "456", "single"},
+		// Edge cases
+		{"", "", ""},
+	}
+	for _, tc := range cases {
+		b := &Block{Comment: tc.comment}
+		if got := b.SampleID(); got != tc.wantSID {
+			t.Errorf("SampleID(%q) = %q, want %q", tc.comment, got, tc.wantSID)
+		}
+		if got := b.Label(); got != tc.wantLabel {
+			t.Errorf("Label(%q) = %q, want %q", tc.comment, got, tc.wantLabel)
+		}
+	}
+}
+
 func TestReaderInvalidFile(t *testing.T) {
 	_, err := NewReader("/nonexistent/file.pcapng")
 	if err == nil {
