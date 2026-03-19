@@ -33,5 +33,5 @@ func runCapture(args []string) {
 		log.Fatal("only gateway mode is available on this architecture (host mode requires x86)")
 	}
 
-	runCaptureGateway(args, outFile, snapLen, wanIface, includeDNS, noResolve)
+	runCaptureGateway(outFile, snapLen, wanIface, includeDNS, noResolve)
 }

@@ -63,7 +63,7 @@ func runCapture(args []string) {
 	fs.Parse(args)
 
 	if mode == "gateway" {
-		runCaptureGateway(args, outFile, snapLen, wanIface, includeDNS, noResolve)
+		runCaptureGateway(outFile, snapLen, wanIface, includeDNS, noResolve)
 		return
 	}
 

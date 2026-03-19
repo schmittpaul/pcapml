@@ -25,7 +25,7 @@ const (
 	gwCfgIncludeDNS = 1
 )
 
-func runCaptureGateway(args []string, outFile string, snapLen uint, wanIface string, includeDNS bool, noResolve bool) {
+func runCaptureGateway(outFile string, snapLen uint, wanIface string, includeDNS bool, noResolve bool) {
 	if wanIface == "" {
 		log.Fatal("gateway mode requires --wan <interface> (specify the WAN/uplink interface; traffic direction is inferred from it)")
 	}
