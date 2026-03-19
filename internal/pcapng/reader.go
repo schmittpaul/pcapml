@@ -60,17 +60,13 @@ func (r *Reader) ReadBlock() (*Block, error) {
 		return nil, fmt.Errorf("invalid block length %d", blockLen)
 	}
 
-	// Read the rest of the block (blockLen - 8 bytes already read)
-	remaining := make([]byte, blockLen-8)
-	if _, err := io.ReadFull(r.f, remaining); err != nil {
-		return nil, fmt.Errorf("read block body: %w", err)
-	}
-
-	// Reconstruct full raw block
+	// Allocate full block and read remaining bytes directly into it
 	raw := make([]byte, blockLen)
 	r.le.PutUint32(raw[0:4], blockType)
 	r.le.PutUint32(raw[4:8], blockLen)
-	copy(raw[8:], remaining)
+	if _, err := io.ReadFull(r.f, raw[8:]); err != nil {
+		return nil, fmt.Errorf("read block body: %w", err)
+	}
 
 	b := &Block{
 		Type:    blockType,
@@ -78,13 +74,14 @@ func (r *Reader) ReadBlock() (*Block, error) {
 	}
 
 	// Parse based on block type
+	body := raw[8:]
 	switch blockType {
 	case SectionHeaderType:
 		// Nothing extra to parse for our purposes
 	case InterfaceDescType:
-		r.parseIDB(b, remaining)
+		r.parseIDB(b, body)
 	case EnhancedPacketType:
-		r.parseEPB(b, remaining)
+		r.parseEPB(b, body)
 	}
 
 	return b, nil
