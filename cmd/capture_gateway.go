@@ -211,8 +211,6 @@ func runCaptureGateway(outFile string, snapLen uint, wanIface string, includeDNS
 	fmt.Printf("packets dropped:   %d\n", st.packetsDropped)
 	fmt.Printf("unique flows:      %d\n", len(sampleIDs))
 	fmt.Printf("output: %s\n", outFile)
-
-
 }
 
 const bpfPinDir = "/sys/fs/bpf/pcapml_gw"
