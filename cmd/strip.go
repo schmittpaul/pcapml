@@ -61,9 +61,9 @@ func runStrip(args []string) {
 			if writer == nil {
 				log.Fatal("EPB before IDB in pcapng file")
 			}
-			ts64 := uint64(block.TsHigh)<<32 | uint64(block.TsLow)
-			tsSec := uint32(ts64 / 1_000_000)
-			tsUsec := uint32(ts64 % 1_000_000)
+			ts := block.Timestamp()
+			tsSec := uint32(ts / 1_000_000)
+			tsUsec := uint32(ts % 1_000_000)
 			if err := writer.WritePacket(tsSec, tsUsec, block.CapLen, block.OrigLen, block.PacketData); err != nil {
 				log.Fatalf("write error: %v", err)
 			}

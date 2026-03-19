@@ -59,8 +59,7 @@ func runSummary(args []string) {
 			continue
 		}
 
-		ts64 := uint64(block.TsHigh)<<32 | uint64(block.TsLow)
-		tsSec := ts64 / 1_000_000
+		tsSec := block.Timestamp() / 1_000_000
 		if tsSec < from || tsSec > to {
 			continue
 		}
