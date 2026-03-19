@@ -110,15 +110,13 @@ func runLabel(args []string) {
 			}
 
 			// Match — write labeled packet
-			// Encode timestamp as microseconds: high=seconds, low=microseconds
-			// (matching original pcapml convention)
-			tsUsec := uint64(ci.Timestamp.UnixMicro())
+			// Encode timestamp as high=seconds, low=microseconds
+			// (matching pcapml convention used by capture and sort/split/strip)
 			tsHigh := uint32(ci.Timestamp.Unix())
 			tsLow := uint32(ci.Timestamp.Nanosecond() / 1000)
-			combined := uint64(tsHigh)<<32 | uint64(tsLow)
-			_ = tsUsec // use the high|low form for compatibility
+			ts := uint64(tsHigh)<<32 | uint64(tsLow)
 
-			if err := writer.WritePacket(combined, data, uint32(ci.Length), l.comment); err != nil {
+			if err := writer.WritePacket(ts, data, uint32(ci.Length), l.comment); err != nil {
 				log.Printf("write error: %v", err)
 			}
 			packetsMatched++
